@@ -1,4 +1,4 @@
-# Crypto Liquidity Terminal
+# Crypto Market Screener
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-14-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
@@ -10,6 +10,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A live crypto market intelligence terminal centered around an **interactive order book liquidity heatmap** for Binance plus a multi-exchange screener. The app surfaces unusual market behavior (volume spikes, sharp moves, volatility expansion, spread widening, order book imbalance, OI/funding anomalies, breakouts) and a unified 0–100 hotness score, all in real time over WebSocket.
+
+> The repository is published as `crypto-liquidity-terminal` because the **Liquidity Chart** is the headline feature; in the running UI the product is still labelled "Crypto Market Screener".
 
 > **Disclaimer.** This tool is for market analysis only. It does **not** place trades, does **not** accept exchange API keys, and is **not** affiliated with any exchange. Mock data is for tests/dev only — the default mode is live public data.
 
@@ -74,103 +76,21 @@ docker compose down -v               # stop and wipe Postgres volume
 
 ## What you'll see
 
-Every screenshot below is from a real live-mode run against `binance-spot` BTCUSDT. The captions explain every control on screen so you know what each setting actually does.
+Every screenshot below is from a real live-mode run with all 5 public adapters connected. The captions describe every control on screen so you know what each setting actually does.
 
-### Liquidity Chart — full layout
-
-![Liquidity Chart](docs/screenshots/01-liquidity-chart.png)
-
-The main view at `/heatmap`. Everything you see is one symbol on one exchange — switching the symbol kicks off a fresh order book WebSocket subscription.
-
-**Top control bar (left → right):**
-
-- **Symbol** — pick any Binance USDT pair. The list comes from `GET /liquidity/symbols`. Switching kicks off a new WS subscription and resets the chart.
-- **Market** — `Spot` or `Futures` (USDT-M perp).
-- **Timeframe** — `1m / 5m / 15m`. Drives the **candle** interval (REST `klines`); the heatmap uses its own much finer time bucket (default 5 s, see [How it's built](#how-the-liquidity-heatmap-is-built)).
-- **Bin size** — price bucket height. `auto` targets ~200 bins across the visible range; fixed `0.1% / 0.25% / 0.5% / 1%` snap to a percentage of mid price. Smaller bins show more detail; larger bins make walls more obvious.
-- **Side** — `combined` (bids + asks), `bids` only, `asks` only, or `imbalance` (|bid − ask| per cell).
-- **Intensity** — legacy linear multiplier; left over from the original colour pipeline. The new density pipeline (right side of the bar) overrides it whenever a preset is selected.
-- **Log scale**, **Candles**, **Delta** — visibility toggles for the candle layer, log-scaled colour ramp, and the volume/delta panel below the chart.
-- **Density** — normalization mode used to map raw liquidity → cell opacity. `raw` (linear), `log` (log-compressed), `percentile` (rank-based, robust to outliers), `zscore` (banded, makes walls pop). Default: `zscore`.
-- **Preset** — a saved tuple of density settings. `Balanced` is the safe default; `Deep Liquidity` is what you see in the screenshots; `Strong Walls` keeps only top ~15% of cells; `Weak Liquidity` lifts the floor to inspect thin areas; `Clean` hides sub-noise without glow.
-- **Depth** — top-N levels per side fed into the heatmap (`50 / 100 / 250 / 500 / 1000`). Higher values reveal walls farther from mid; the default is 500.
-- **Lookback** — how far back into the live ring buffer the heatmap reads (`15m / 30m / 1h / 2h / 4h / max`). Capped by `MAX_HEATMAP_LOOKBACK_HOURS` env (default 4 h).
-- **Gamma** — non-linear cell-opacity correction. `< 1` lifts weak cells (more visible thin liquidity), `> 1` flattens them.
-- **Glow** — additive overlay on top-percentile cells; gives walls a soft halo.
-- **Hide weak** / **Strong only** — drop sub-threshold cells (≥ 0.55 z-score) / keep only the strongest (≥ 0.85). Combine with `Strong Walls` preset to isolate iceberg orders.
-
-**Chart toolbar (above the canvas):**
-
-- **Cursor** — pan + select drawings. **Hand** — drag-to-pan only.
-- **Horizontal Line / Trend Line / Ray / Rectangle / Text Label** — drawing tools. Drawings persist in `localStorage` per `exchange:marketType:symbol`.
-- **Eraser** — click to remove a drawing.
-- **Clear All** — drops every drawing for the current symbol.
-- **+ / −** — zoom in/out (time axis).
-- **Reset** — fit viewport to the timeframe-default visible range (1m → 15 min, 5m → 1 h, 15m → 4 h).
-- **Fit** — same as Reset; uses the union of candle range and matrix range.
-
-**Inside the canvas:**
-
-- **Heatmap cells (cyan/teal = bid, magenta/pink = ask, lilac = balanced).** Brightness encodes liquidity at that price × time bucket. Stable walls show as horizontal bright streaks across many time slices; ephemeral spoofing flashes briefly.
-- **Candles** — overlaid on top of the heatmap, aligned to candle body geometry pixel-for-pixel (the volume bar below sits exactly under each candle body).
-- **Dashed white horizontal line** — current mid price from `bestBid` and `bestAsk`.
-- **"heatmap collection started" marker** — vertical orange dashed line showing when the WS feed for this symbol opened. Anything to the left exists only as candles, not as heatmap.
-- **Right axis** — price labels (decimals scale with magnitude). **Bottom axis** — local time HH:MM:SS.
-- **Volume / delta histogram** below the chart. In `delta` mode green bars above the centre line are net taker buys, red below are net taker sells; falls back to per-candle volume when delta has < 2 buckets.
-
-**Right-side panel:**
-
-- **Order Book** — top 12 bids + top 12 asks live, refreshed each poll (~2 s). Spread and `bid-ask imbalance` (signed −1..+1) at the top.
-
-**Below the chart:**
-
-- **DebugBar** — every diagnostic the heatmap pipeline produces: stream status, time bucket size in ms, snapshot count, cell count, price bin count, completeness vs the timeframe's required history, oldest/newest snapshot timestamps, applied vs max lookback, the heatmap price window, and the visible-cells count after viewport clipping. Use it to confirm the heatmap is actually running, not stuck.
-
-### Drawing tools in action
-
-![Liquidity Chart with drawings](docs/screenshots/02-liquidity-drawings.png)
-
-The same chart with a couple of horizontal levels and a trend line dropped on top. Drawings are pure client-side and don't affect the heatmap pipeline — they're stored in `localStorage` keyed by `exchange:marketType:symbol`, so switching back to BTCUSDT later restores them. The Eraser tool removes a single drawing on click; **Clear All** wipes them for the current symbol after a confirmation prompt.
-
-Geometry note: drawings are anchored in **price/time domain coordinates**, not pixels. Zooming and panning move them with the chart instead of dragging them around. This is the same invariant that the heatmap cells follow — viewport changes are pure visual transforms, never a server refetch (the polling loop only refetches on symbol/market/timeframe change or an explicit "Rebuild for visible range" click).
-
-### Screener
-
-![Screener](docs/screenshots/03-screener.png)
-
-The `/screener` page is the fast multi-exchange filter table. Every column is sortable; the URL stays in sync with the filter state so you can share a link.
-
-- **Filter panel (top)** — exchange, market type (spot/futures), quote asset, signal types, watchlist-only toggle, plus min/max thresholds for `volume24h`, `change5m / 15m / 1h / 24h`, `relativeVolume`, `volatility`, `spreadPct`, `tradesPerMinute`, `signalScore`, and `OI change`.
-- **Score column** — unified 0–100 from `screener-engine`. Bands: `cold (0–24)` / `normal (25–60)` / `hot (61–80)` / `extreme (81–100, default `HOT_MARKET` threshold)`.
-- **Signals column** — colored badges for each active detector: volume spike, price pump/dump, volatility expansion, spread widening, order book imbalance, OI spike, funding anomaly, breakout, hot market.
-- **Star (★)** — toggle watchlist; persisted in `localStorage`. Starred symbols can be filtered with the `Watchlist only` checkbox.
-- **Sortable headers** — `Symbol` / `Exchange` / `Quote` use lexicographic ordering server-side (via `localeCompare`); numeric columns sort numerically.
-
-Live updates flow over WebSocket: the API coalesces market changes into 750 ms `market:batch` messages so the table doesn't repaint every tick, but reactions to price moves still feel immediate.
-
-### Market detail
-
-![Market detail](docs/screenshots/04-market-detail.png)
-
-`/markets/:symbol` shows everything for one market in one place. Header has the symbol, current price, 24 h change, score badge, and signal badges. Below:
-
-- **Sparkline + headline metrics** — 60-min price miniature, `change5m / 15m / 1h / 24h`, `volume24h`, `relativeVolume`, `volatility`, `tradesPerMinute`, `spreadPct`, `orderBookImbalance`, plus `openInterest` and `fundingRate` for futures.
-- **Order book** — top 20 bids / top 20 asks with cumulative volume bars, refreshed via `GET /markets/:symbol/orderbook`.
-- **Recent trades** — last 100 trades from `GET /markets/:symbol/trades`, side-coloured.
-- **Recent signals** — every signal the engine fired for this symbol with timestamp and message.
-- **Alert this symbol** — shortcut to `/alerts?prefill={symbol,exchange,marketType}` so the form on the alerts page comes pre-filled.
+The screenshots happen to match this README's order: **Alerts → Settings → Signals → Liquidity Chart (cursor) → Liquidity Chart (with drawings) → Market detail → Screener.**
 
 ### Alerts
 
 ![Alerts](docs/screenshots/05-alerts.png)
 
-Three panels on `/alerts`:
+`/alerts`. Three panels:
 
-- **Create Alert (left)** — pick `Symbol`, `Market type`, `Exchange`, `Condition` (one of 11: `PRICE_CHANGE_5M/15M/1H/24H`, `RELATIVE_VOLUME`, `VOLATILITY`, `SPREAD`, `ORDER_BOOK_IMBALANCE`, `SIGNAL_SCORE`, `OPEN_INTEREST`, `FUNDING_RATE`), `Operator` (`> >= < <= ==`), `Threshold`, and `Cooldown` (default 300 s = 5 min). `OPEN_INTEREST` and `FUNDING_RATE` are futures-only; the form disables them when `marketType=spot` and shows "(futures only)".
-- **Active Alerts (right)** — every saved rule. Each row has an enabled/disabled toggle, last-fired time, and a delete button. `enabled: true` after `false` resets `lastTriggeredAt` so the cooldown doesn't suppress the next match.
-- **Recent Alert Events (bottom)** — live feed of triggered events from the AlertEvaluator (runs every 2 s by default). Each row has the trigger time, symbol, observed value, the threshold it crossed, and the human-readable message.
+- **Create Alert (top-left)** — pick `Symbol` (free-text with auto-complete from tracked markets), `Market Type` (`spot`/`futures`), `Exchange`, `Condition`, `Operator` (`> >= < <= ==`), `Threshold`, and `Cooldown` (default `300` s = 5 min). Eleven `Condition` types live in the dropdown: `PRICE_CHANGE_5M / 15M / 1H / 24H`, `RELATIVE_VOLUME`, `VOLATILITY`, `SPREAD`, `ORDER_BOOK_IMBALANCE`, `SIGNAL_SCORE`, plus the futures-only `OPEN_INTEREST` and `FUNDING_RATE`. The two futures-only options are disabled in the dropdown when `Market Type=spot` and the form rejects mismatched submissions with a Zod `validation_error`.
+- **Active Alerts (top-right)** — every saved rule with an enable/disable toggle, last-fired timestamp, and a delete button. Re-enabling a disabled alert resets `lastTriggeredAt` so the cooldown doesn't suppress the next match.
+- **Recent Alert Events (bottom)** — live feed of triggered events from the AlertEvaluator (runs every 2 s). Each row has trigger time, symbol, observed value, the threshold it crossed, and a human-readable message.
 
-The alert condition validation is enforced server-side via Zod, so a misuse like `FUNDING_RATE` on a spot market returns `400 validation_error` rather than silently saving.
+The blue "Connected" dot in the top-right is the global WebSocket status; it turns red on disconnect.
 
 ### Settings + readiness
 
@@ -178,16 +98,129 @@ The alert condition validation is enforced server-side via Zod, so a misuse like
 
 `/settings` — split into four panels:
 
-- **Runtime** — `Mode` (`Live Public Data` / `Hybrid` / `Mock`, derived from the registry's actual adapter set, not just env intent), `WebSocket` connection state, `Server status`, `Database` (`ok`/`unavailable`), `Redis` (`ok`/`fallback`), `Settings storage` (`database` / `memory fallback` / `browser localStorage`), `Enabled exchanges` (with `*` annotation for any in degraded state). `Retry` button refetches on demand.
-- **Server-side defaults** — `defaultExchange / defaultMarketType / defaultQuoteAsset / screenerUpdateFrequencyMs`. Saved through `PATCH /settings`. If Postgres is unavailable, the API returns 200 with `storage: "memory"` and a warning banner appears explaining the choice will reset on API restart but is mirrored to your browser meanwhile.
-- **Local preferences** — `Theme` (`dark`/`light`) and `Table density` (`comfortable`/`compact`). These are pure browser state, never sent to the server.
-- **Watchlist** — chips for every starred symbol with a `Clear watchlist` action.
+- **Runtime (top-left)** — `Mode` is the live operational mode derived from the registry's actual adapter set, not just env intent. `Live Public Data` here means all 5 enabled exchanges are running. `WebSocket: connected` is the live status of the browser ↔ API channel. `Server status: ok` / `Database: ok` / `Redis: ok` come from `GET /readiness`. `Settings storage: database` confirms `PATCH /settings` persists to Postgres; if it falls back to in-memory you'd see `memory fallback` plus an explanatory banner. `Enabled exchanges` is the live list with `*` annotation for any in degraded state.
+- **Server-side defaults (top-right)** — `Default exchange / Default market type / Default quote asset / Update frequency (ms)`. Edits go through `PATCH /settings` with optimistic UI mirroring to `localStorage`. The `Update frequency` field is the screener job cadence (250 ms minimum, 1 s default).
+- **Local preferences — browser only (bottom-left)** — `Theme` (`dark` / `light`) and `Table density` (`comfortable` / `compact`). These are pure browser state, never sent to the server.
+- **Watchlist (bottom-right)** — chips for every starred symbol. Empty when no markets have been starred from the screener; otherwise has a `Clear watchlist` action.
 
 ### Signals feed
 
 ![Signals](docs/screenshots/07-signals.png)
 
-`/signals` is the lightweight, fast-scrolling feed of every signal the engine has fired recently across all tracked markets. It reuses the same store as the Dashboard's "Live Signal Feed" panel; each row links to that symbol's market detail page. Useful as a passive monitor in a side window while you trade in another tool.
+`/signals` is a fast-scrolling feed of every signal the engine has fired recently. Columns: `Time` / `Symbol` (link to market detail) / `Type` / `Score` / `Message`. Score is the unified 0–100 for that detector firing, not the market's overall hotness — that's why a single market can fire `SPREAD_WIDENING` at 100 (extreme spread) while still being "cold" on the dashboard.
+
+The screenshot shows real recent firings on Kraken / Coinbase markets: `SPREAD_WIDENING` dominates at the top (a few markets had spreads from 0.169% all the way up to 10.466%), `ORDER_BOOK_IMBALANCE` at 88 score (BTCUSDT 87.7% imbalance), `BREAKOUT` at 75 ("Range breakout (up)"), `VOLUME_SPIKE` at 100 ("Volume 5.88× baseline"), and `VOLATILITY_EXPANSION` at 62 ("Volatility expanded 2.46× baseline"). This panel reuses the same store as the Dashboard's "Live Signal Feed" — useful as a passive monitor in a side window.
+
+### Liquidity Chart — full layout
+
+![Liquidity Chart](docs/screenshots/01-liquidity-chart.png)
+
+The main view at `/heatmap`. Everything you see is one symbol on one exchange — switching the symbol kicks off a fresh order book WebSocket subscription. The status row above the controls reads `Binance Spot · live · 5 728 snapshots · 74 766 trades` — that's the real-time tally from the dedicated `LiquidityFeed` for BTCUSDT-spot.
+
+**Top control bar (left → right, every field):**
+
+- **Symbol** — Binance USDT pairs from `GET /liquidity/symbols`. Switching kicks off a new WS subscription and resets the chart.
+- **Market** — `Spot` or `Futures` (USDT-M perp).
+- **Timeframe** — `1m / 5m / 15m`. Drives the **candle** interval (REST `klines`); the heatmap uses its own much finer bucket (default 5 s, see [How it's built](#how-the-liquidity-heatmap-is-built)).
+- **Bin size** — price bucket height. `auto` targets ~200 bins across the visible range; fixed `0.1% / 0.25% / 0.5% / 1%` snap to a percentage of mid. Smaller bins = more detail; larger bins = more obvious walls.
+- **Side** — `combined` (bids + asks), `bids` only, `asks` only, or `imbalance` (`|bid − ask|` per cell).
+- **Intensity** — legacy linear multiplier from the original colour pipeline. The new `Density` modes on the right side override it.
+- **Log scale**, **Candles**, **Delta** — toggles for the candle layer, log-scaled colour ramp, and the volume/delta panel below.
+- **Density** — normalization mode used to map raw liquidity → cell opacity. `raw` (linear), `log` (log1p compression), `percentile` (rank-based, robust), `zscore` (banded, makes walls pop). The screenshot uses `raw`.
+- **Preset** — saved tuple of density settings. `Balanced` is the safe default shown here; `Deep Liquidity` lifts weak cells; `Strong Walls` keeps only top ~15 % of cells; `Weak Liquidity` zooms into thin areas; `Clean` hides sub-noise without glow.
+- **Depth** — top-N levels per side fed into the heatmap (`50 / 100 / 250 / 500 / 1000`). Higher = walls farther from mid become visible. Screenshot uses `1000`.
+- **Lookback** — how far back into the live ring buffer the heatmap reads (`15m / 30m / 1h / 2h / 4h / max`). Capped by `MAX_HEATMAP_LOOKBACK_HOURS` env (default 4 h). Screenshot uses `Max`.
+- **Gamma** — non-linear cell-opacity correction. `< 1` lifts weak cells, `> 1` flattens them. Screenshot shows `1.43`.
+- **Glow** / **Hide weak** / **Strong only** — drop sub-threshold cells, keep only top cells, or add an additive halo on top-percentile cells. All three off in the screenshot.
+
+**Chart toolbar (second row):**
+
+`Cursor` (active here) and `Hand / Pan` are the two navigation modes. Then the drawing tools: `Horizontal Line`, `Trend Line`, `Ray`, `Rectangle`, `Text Label`. `Eraser` deletes one drawing on click. `Clear All` wipes every drawing for the current symbol after confirmation. `+` / `−` zoom the time axis; `Reset` snaps the viewport to the timeframe-default visible range; `Fit` is the same.
+
+**DebugBar (third row).** Every diagnostic the heatmap pipeline produces, end to end:
+
+- `Stream: live` — the `LiquidityFeed` WS is open.
+- `Time bucket: 1m` — adaptive heatmap bucket width chosen for the current viewport zoom (5 s minimum, 60 s cap).
+- `Visible: 2.4h` — what the chart's time axis currently spans.
+- `Snapshot span: 5h` — total time covered by stored ring-buffer snapshots.
+- `Required history: 15s` — minimum window for the timeframe's default fit.
+- `Heatmap age: 5h · Completeness: 100%` — feed has been running long enough to fill its lookback window.
+- `Feed started: 18:04:34` — when this WS opened (also the orange dashed marker on the chart).
+- `Snapshots: 5728 · Cells: 1517 · Price bins: 172 · Time buckets: 51 · Candles: 500` — sizes through the pipeline. 5 728 raw depth snapshots aggregated into 1 517 visible cells.
+- `Heatmap lookback: max · Heatmap window: 73 027.20 – 76 860.71 · Viewport window: 74 664.18 – 75 736.66 · Viewport inside matrix: yes` — the matrix was built around mid ±2 %, the viewport sits comfortably inside it. If you panned/zoomed past the matrix range, an `Outside heatmap window` banner with a `Rebuild for visible range` button would appear.
+- `Visible cells: 1339 · Hidden (out of view): 478` — clipping result for the current viewport. Density changes never affect this count; only zoom/pan do.
+- `Available history: 2h0 / 4.0h · Rendered range: 55m` — buffer fill vs cap.
+
+**Inside the canvas:**
+
+- **Heatmap cells** — cyan/teal for bid-dominant cells, magenta/pink for ask-dominant, lilac for balanced. Brightness encodes liquidity at that price × time bucket. Stable walls show as horizontal bright streaks across many time slices; ephemeral spoofing flashes briefly.
+- **Candles** — overlaid on top of the heatmap, aligned to candle body geometry pixel-for-pixel (the volume bar below sits exactly under each candle body).
+- **Dashed white horizontal line** — current mid price.
+- **Vertical orange dashed line** with `heatmap collection started` label — the moment the WS feed opened. Anything to the left exists only as candles, not as heatmap.
+- **Right axis** — price labels (decimals scale with magnitude). **Bottom axis** — local time `HH:MM:SS`.
+
+**Right-side Order Book panel:** top 12 bids + top 12 asks live with `Best bid / Best ask / Mid / Spread % / Imbalance` summary, refreshed each poll (~2 s). The `Biggest bid walls` / `Biggest ask walls` rows at the bottom call out the largest standing orders.
+
+**Volume / delta histogram below the chart.** In `delta` mode green bars above the centre line are net taker buys, red below are net taker sells, with a thin white line tracing cumulative delta. Falls back to per-candle volume when delta has < 2 buckets.
+
+**Status bar (bottom):** active `Tool`, current `Zoom %`, viewport time range, viewport price range, and drawing count.
+
+### Drawing tools — symmetric triangle on BTCUSDT
+
+![Liquidity Chart with drawings](docs/screenshots/02-liquidity-drawings.png)
+
+The same chart in `Hand / Pan` mode, panned ~3 hours back to the period before the heatmap started, with three trend lines drawn in orange to highlight a converging symmetric-triangle pattern that broke down into the orange-marker zone where live heatmap walls then formed. The DebugBar's `Drawings: 3` field at the right confirms the count.
+
+Geometry note worth understanding: drawings are anchored in **price/time domain coordinates**, not pixels. Zoom and pan move them together with candles instead of dragging them around. The same invariant applies to heatmap cells — viewport changes are pure visual transforms client-side, never a server refetch (the polling loop only refetches on symbol/market/timeframe change or an explicit "Rebuild for visible range" click).
+
+Drawings persist in `localStorage` keyed by `exchange:marketType:symbol`, so navigating away from BTCUSDT and back later restores them. The Eraser tool removes one drawing on click; **Clear All** wipes them for the current symbol after a confirmation prompt.
+
+### Market detail
+
+![Market detail](docs/screenshots/04-market-detail.png)
+
+`/markets/BTCUSDT?exchange=okx&marketType=spot`. Everything for one market in one place.
+
+**Header.** A back-link to the screener, the watchlist star, the symbol with `okx · spot` venue tag, a `cold · 17` score badge (band + numeric score), and a `+ New alert for BTCUSDT` button that jumps to `/alerts?prefill=...` with the form pre-filled.
+
+**Headline metrics.** Six tiles:
+
+- `PRICE 75312.30` — last trade.
+- `24H -1.56%` — colour-coded vs zero.
+- `5M / 15M / 1H -0.03% · +0.02% · +0.36%` — three windows in one tile.
+- `VOLUME 24H 392.87M` — quote-volume.
+- `RELATIVE VOLUME 0.65×` — current vs baseline (`< 1` = quieter than usual).
+- `SPREAD % 0.000%` — quote spread; near-zero on a deep BTCUSDT book.
+- `OB IMBALANCE -9.2%` — signed bid/ask imbalance over visible levels.
+- `ACTIVE SIGNALS —` — empty here because BTCUSDT-okx is calm right now; it would show colored signal-type chips when detectors fire.
+
+**Price (last 200 × 1m).** A 60-min mini-chart driven by the same `klines` REST endpoint the heatmap uses. Pure SVG, no canvas — light enough to render hundreds of these on the screener page.
+
+**Order Book (top 20).** Live bids (green) and asks (red) with a per-row green/red `QTY` bar visualising depth. Updates each poll.
+
+**Recent Trades (last 100).** Time / Side / Price / Qty. Each side coloured (green = buy taker, red = sell taker). The screenshot shows a string of small sells on okx — typical low-volume mid-day flow.
+
+Below the visible area (scroll down): Recent Signals for this symbol and an `Alerts for BTCUSDT` mini-panel.
+
+### Screener
+
+![Screener](docs/screenshots/03-screener.png)
+
+`/screener` is the multi-exchange filter table. Every column is sortable; the URL stays in sync with the filter state so you can share a link.
+
+**Preset chips (top row).** One-click filter combos: `Scalping` (high Trades/min, low spread), `High Volume` (top quote-volume), `Volatility` (high `Vlty` column), `Futures OI` (futures only with non-null OI), `Low Spread` (`Spread % < threshold`), `Meme Coins` (curated symbol set), `Breakout` (recently fired `BREAKOUT` signal). The `Reset` button clears everything.
+
+**Filters.** Exchange checkboxes (`mock / binance / bybit / okx / coinbase / kraken`), `Market Type` (`spot` / `futures`), `Quote Asset` (`USDT / USDC / USD / BTC`), `Min Volume 24h`, `Min 5m %`, `Min 15m %`, `Min 1h %`, `Min Relative Volume`, `Min Volatility`, `Max Spread %`, `Min Trades/min`, `Min Signal Score`, `Search` (text search over symbol), `Has active signal`, `Watchlist only`.
+
+**Table columns.** `Symbol` (link to market detail), `Exch`, `Type`, `Price`, `24H`, `5m`, `15m`, `1h`, `Vol 24h`, `Rel Vol`, `Vlty`, `Spread %`, `OB Imb`, `OI`, `Funding`, `Score`, `Signals`. The screenshot shows 61 markets passing the active filters; the `Score` column is currently the active sort (descending arrow).
+
+**Score column.** Unified 0–100 from `screener-engine`. Bands: `cold (0–24)` / `normal (25–60)` / `hot (61–80)` / `extreme (81–100, default `HOT_MARKET` threshold)`. Each row's pill is colour-coded.
+
+**Signals column.** Compact badges for active detectors. Visible in the screenshot: `VOL` (volume spike), `PUMP` (price pump), `VLTY` (volatility expansion), `SPRD` (spread widening), `BO` (breakout), `OB` (order book imbalance). Clicking a badge isn't a navigation — they're status-only chips; click the symbol link instead.
+
+**Star (★).** Toggles the row in the watchlist; persisted in `localStorage`. With `Watchlist only` checked the table filters down to starred rows.
+
+**Sortable headers.** Numeric columns sort numerically server-side; `Symbol`/`Exch`/`Quote` use `localeCompare` (lex order). Live updates flow via WebSocket `market:batch` messages every 750 ms — values pulse without re-rendering the whole table.
 
 ---
 
