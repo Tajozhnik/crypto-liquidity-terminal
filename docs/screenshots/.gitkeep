@@ -1,0 +1,2 @@
+# Screenshots are stored in this directory.
+# Run `pnpm tsx scripts/take-screenshots.ts` (after `npx playwright install chromium`) to (re)generate them.

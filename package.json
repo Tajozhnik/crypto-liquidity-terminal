@@ -1,0 +1,20 @@
+{
+  "name": "crypto-market-screener",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.7.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev:api": "pnpm --filter @screener/api dev",
+    "dev:web": "pnpm --filter @screener/web dev"
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}

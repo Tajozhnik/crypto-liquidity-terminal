@@ -1,0 +1,35 @@
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+.pnpm-store/
+coverage/
+*.log
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env.*.local
+
+# prisma
+**/prisma/migrations/dev.db
+**/.prisma/
+**/generated/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Build artifacts / archives
+crypto-market-screener.zip
+crypto-market-screener-*.zip
+
+# Local screenshot drafts (commit only the polished ones in docs/screenshots/)
+docs/screenshots-drafts/

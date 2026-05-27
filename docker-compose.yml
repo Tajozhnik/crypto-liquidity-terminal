@@ -1,0 +1,102 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: screener
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d screener"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      USE_MOCK_DATA: "false"
+      LOG_LEVEL: info
+      MOCK_MARKET_COUNT: 80
+      MOCK_UPDATE_INTERVAL_MS: 750
+      MOCK_SEED: 42
+      SCREENER_INTERVAL_MS: 1000
+      ALERT_INTERVAL_MS: 2000
+      WS_BATCH_INTERVAL_MS: 750
+      WS_BATCH_MAX_ENTRIES: 500
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/screener
+      REDIS_URL: redis://redis:6379
+      API_PORT: 4000
+      CORS_ORIGINS: http://localhost:3000
+      RATE_LIMIT_MAX: 120
+      RATE_LIMIT_WINDOW_MS: 60000
+      HOT_MARKET_SCORE_THRESHOLD: 81
+      # ---- No-subscription data policy ----
+      DISABLE_PAID_PROVIDERS: "true"
+      MARKET_METADATA_PROVIDER: none
+      EXTERNAL_API_TIMEOUT_MS: 5000
+      EXTERNAL_API_CACHE_TTL_SECONDS: 30
+      # ---- Operating mode ----
+      # Default: live public Binance data (no mock).
+      # Mock fixtures are only for tests/dev — set USE_MOCK_DATA=true to enable.
+      ENABLE_PUBLIC_API_ADAPTERS: "true"
+      ENABLED_EXCHANGES: binance,bybit,okx,coinbase,kraken
+      LIVE_POLLING_INTERVAL_MS: 60000
+      LIVE_POLLING_SYMBOL_LIMIT: 15
+    ports:
+      - "4000:4000"
+    healthcheck:
+      # /health is a static "I'm alive" probe — fast, no DB roundtrip.
+      # node -e is used because curl/wget aren't installed in the alpine image.
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
+      NEXT_PUBLIC_WS_URL: ws://localhost:4000/ws
+      # Next.js standalone server binds to `process.env.HOSTNAME` and
+      # defaults to the container's primary interface (172.x). Forcing
+      # 0.0.0.0 makes the in-container healthcheck reachable via
+      # 127.0.0.1 and doesn't change the published 3000 port mapping.
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  postgres-data:

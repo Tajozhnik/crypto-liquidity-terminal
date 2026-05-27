@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Alert {
+  id              String       @id @default(cuid())
+  symbol          String
+  exchange        String
+  marketType      String
+  conditionType   String
+  operator        String
+  threshold       Float
+  timeframe       String?
+  enabled         Boolean      @default(true)
+  cooldownSeconds Int          @default(300)
+  lastTriggeredAt DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  events          AlertEvent[]
+
+  @@index([enabled])
+}
+
+model AlertEvent {
+  id          String   @id @default(cuid())
+  alertId     String
+  alert       Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  symbol      String
+  message     String
+  value       Float
+  threshold   Float
+  triggeredAt DateTime @default(now())
+
+  @@index([alertId])
+  @@index([triggeredAt])
+}
+
+model SignalEvent {
+  id         String   @id @default(cuid())
+  symbol     String
+  exchange   String
+  marketType String
+  signalType String
+  score     Float
+  message    String
+  payload    Json
+  createdAt  DateTime @default(now())
+
+  @@index([symbol])
+  @@index([signalType])
+  @@index([createdAt])
+}
+
+model UserSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Watchlist {
+  id         String   @id @default(cuid())
+  userId     String?
+  exchange   String
+  marketType String
+  symbol     String
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, exchange, marketType, symbol])
+}
